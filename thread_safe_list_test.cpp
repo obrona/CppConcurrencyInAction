@@ -101,15 +101,37 @@ void test_maintains_increasing_list() {
     CHECK(got == expected);
 }
 
-// remove_if deletes the first element matching the predicate and stops.
-void test_remove_if_removes_first_match_only() {
+// remove_if deletes every element matching the predicate.
+void test_remove_if_removes_all_matches() {
     list<int> l;
     l.push_front(3);
     l.push_front(2);
     l.push_front(2);
     l.push_front(1);                           // list: 1, 2, 2, 3
-    l.remove_if([](int x) { return x == 2; }); // drops the first 2 only
-    CHECK((to_vector(l) == std::vector<int>{1, 2, 3}));
+    l.remove_if([](int x) { return x == 2; }); // drops both 2s
+    CHECK((to_vector(l) == std::vector<int>{1, 3}));
+}
+
+// Matches scattered through the list (including head and tail) are all removed.
+void test_remove_if_removes_scattered_matches() {
+    list<int> l;
+    l.push_front(2);
+    l.push_front(3);
+    l.push_front(2);
+    l.push_front(1);
+    l.push_front(2);                           // list: 2, 1, 2, 3, 2
+    l.remove_if([](int x) { return x == 2; });
+    CHECK((to_vector(l) == std::vector<int>{1, 3}));
+}
+
+// A predicate matching everything empties the list in a single call.
+void test_remove_if_matching_all_empties_list() {
+    list<int> l;
+    l.push_front(3);
+    l.push_front(2);
+    l.push_front(1);
+    l.remove_if([](int) { return true; });
+    CHECK(to_vector(l).empty());
 }
 
 void test_remove_if_no_match_is_noop() {
@@ -130,15 +152,14 @@ void test_remove_head_element() {
     CHECK((to_vector(l) == std::vector<int>{2, 3}));
 }
 
-void test_remove_all_via_repeated_remove_if() {
+// remove_if on an already-empty list is a safe no-op.
+void test_remove_if_on_empty_list_is_noop() {
     list<int> l;
-    l.push_front(3);
-    l.push_front(2);
+    l.remove_if([](int) { return true; });
+    CHECK(to_vector(l).empty());
     l.push_front(1);
-    l.remove_if([](int) { return true; });     // removes first
-    l.remove_if([](int) { return true; });     // removes next
-    l.remove_if([](int) { return true; });     // removes last
-    l.remove_if([](int) { return true; });     // empty: no-op
+    l.remove_if([](int) { return true; });     // empties it
+    l.remove_if([](int) { return true; });     // now a no-op
     CHECK(to_vector(l).empty());
 }
 
@@ -320,10 +341,12 @@ int main() {
     RUN(test_insert_at_pred_appends_at_end);
     RUN(test_insert_at_pred_inserts_before_match);
     RUN(test_maintains_increasing_list);
-    RUN(test_remove_if_removes_first_match_only);
+    RUN(test_remove_if_removes_all_matches);
+    RUN(test_remove_if_removes_scattered_matches);
+    RUN(test_remove_if_matching_all_empties_list);
     RUN(test_remove_if_no_match_is_noop);
     RUN(test_remove_head_element);
-    RUN(test_remove_all_via_repeated_remove_if);
+    RUN(test_remove_if_on_empty_list_is_noop);
     RUN(test_works_with_strings);
     RUN(test_concurrent_push_front);
     RUN(test_concurrent_push_and_iterate);

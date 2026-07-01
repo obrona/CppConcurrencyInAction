@@ -48,7 +48,7 @@ struct list {
         }
     }
 
-    // removes the 1st element onlly satisfying a predicate.
+    // removes the all elements satisfying some predicate.
     template <typename Pred>
     void remove_if(Pred pred) {
         std::unique_lock lk(head.m);
@@ -63,7 +63,6 @@ struct list {
                 // release lk2 before old_next (which owns next's mutex) is
                 // destroyed, otherwise ~unique_lock unlocks a freed mutex.
                 lk2.unlock();
-                return;
             } else {
                 curr = next;
                 lk = std::move(lk2);
