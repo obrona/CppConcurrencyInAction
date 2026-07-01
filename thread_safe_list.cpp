@@ -48,6 +48,7 @@ struct list {
         }
     }
 
+    // removes the 1st element onlly satisfying a predicate.
     template <typename Pred>
     void remove_if(Pred pred) {
         std::unique_lock lk(head.m);
@@ -81,7 +82,7 @@ struct list {
         while (node *next = curr->next.get()) {
             std::unique_lock lk2(next->m);
             lk.unlock();
-            fn(next->data.get());
+            fn(*next->data);
             curr = next;
             lk = std::move(lk2);
         }

@@ -37,7 +37,7 @@ static int g_failures = 0;
 template <typename T>
 std::vector<T> to_vector(list<T> &l) {
     std::vector<T> out;
-    l.for_each([&](T *p) { out.push_back(*p); });
+    l.for_each([&](T &v) { out.push_back(v); });
     return out;
 }
 
@@ -193,8 +193,8 @@ void test_concurrent_push_and_iterate() {
 
     std::thread reader([&] {
         while (!done.load()) {
-            l.for_each([&](int *p) {
-                if (*p < 0 || *p >= kPer) bad.store(true);
+            l.for_each([&](int p) {
+                if (p < 0 || p >= kPer) bad.store(true);
             });
         }
     });
@@ -231,6 +231,89 @@ void test_concurrent_insert_and_remove() {
     CHECK(got.size() == static_cast<size_t>(kThreads * (kPer / 2)));
 }
 
+// *** Maintain an ascending list under concurrent push / read / delete. ***
+//
+// Producers insert values with predicate `x > v`, i.e. before the first
+// element strictly greater than v. insert_at_pred locks hand-over-hand, so a
+// value always lands between a node <= v and the first node > v; that keeps the
+// list ascending no matter how many producers insert at once. Readers walk the
+// list (front-to-back) and assert each value is >= the previous one they saw:
+// any value inserted between two observed nodes is, by the predicate, between
+// their values, so an in-order walk can never observe a descending step.
+// Deleters concurrently drop values via remove_if, which is also hand-over-hand
+// and therefore can't break the ordering either.
+void test_concurrent_sorted_invariant() {
+    constexpr int kProducers = 4;
+    constexpr int kPer = 4000;
+    constexpr int kReaders = 3;
+    constexpr int kDeleters = 3;
+    constexpr int kMax = kProducers * kPer;   // exclusive upper bound on values
+    constexpr int kStride = 7919;             // prime, coprime to kPer => permutes
+
+    list<int> l;
+    std::atomic<bool> done{false};
+    std::atomic<bool> unsorted{false};        // a reader saw a descending step
+    std::atomic<bool> out_of_range{false};    // a reader saw a bogus value
+
+    auto sorted_insert = [&](int v) {
+        l.insert_at_pred(v, [v](int x) { return x > v; });
+    };
+
+    // Start readers and deleters first so they race against the producers.
+    std::vector<std::thread> readers;
+    for (int t = 0; t < kReaders; ++t) {
+        readers.emplace_back([&] {
+            while (!done.load()) {
+                int prev = -1;                 // every real value is >= 0
+                l.for_each([&](int v) {
+                    if (v < prev) unsorted.store(true);
+                    if (v < 0 || v >= kMax) out_of_range.store(true);
+                    prev = v;
+                });
+            }
+        });
+    }
+
+    std::vector<std::thread> deleters;
+    for (int t = 0; t < kDeleters; ++t) {
+        deleters.emplace_back([&, t] {
+            int v = (t * 2) % kMax;            // each deleter starts staggered
+            while (!done.load()) {
+                l.remove_if([v](int x) { return x == v; });  // no-op if absent
+                v = (v + 2) % kMax;            // sweep the even values
+            }
+        });
+    }
+
+    // Producers own disjoint value blocks, inserted in a scrambled (permuted)
+    // order so insertions land all over the list rather than at one end.
+    std::vector<std::thread> producers;
+    for (int t = 0; t < kProducers; ++t) {
+        producers.emplace_back([&, t] {
+            int base = t * kPer;
+            for (int i = 0; i < kPer; ++i)
+                sorted_insert(base + (i * kStride) % kPer);
+        });
+    }
+
+    for (auto &t : producers) t.join();
+    done.store(true);
+    for (auto &t : readers) t.join();
+    for (auto &t : deleters) t.join();
+
+    // No reader ever observed a descending step or a garbage value.
+    CHECK(!unsorted.load());
+    CHECK(!out_of_range.load());
+
+    // The final list is ascending, in range, and has no duplicates (every value
+    // was inserted exactly once; removals only ever delete).
+    auto got = to_vector(l);
+    CHECK(std::is_sorted(got.begin(), got.end()));
+    CHECK(std::adjacent_find(got.begin(), got.end()) == got.end());
+    for (int v : got) CHECK(v >= 0 && v < kMax);
+    CHECK(got.size() <= static_cast<size_t>(kMax));
+}
+
 int main() {
     RUN(test_empty_list_iterates_nothing);
     RUN(test_push_front_order_is_reversed);
@@ -245,6 +328,7 @@ int main() {
     RUN(test_concurrent_push_front);
     RUN(test_concurrent_push_and_iterate);
     RUN(test_concurrent_insert_and_remove);
+    RUN(test_concurrent_sorted_invariant);
 
     std::println("");
     std::println("{}/{} checks passed", g_checks - g_failures, g_checks);
