@@ -10,6 +10,7 @@
 #undef main
 
 #include <atomic>
+#include <memory>
 #include <print>
 #include <set>
 #include <string>
@@ -109,6 +110,60 @@ void test_string_keys_and_values() {
     CHECK(m.value_for("missing", "none") == "none");
     CHECK(m.value_for("missing") == "");   // default-constructed std::string
     CHECK(m.size() == 2);
+}
+
+// ---- shared_ptr values: references to stored objects for mutation -----------
+
+// value_for() returns a *copy* of the stored Value. When Value is a
+// shared_ptr<T>, that copy shares ownership of the same T, so callers can
+// mutate the stored object in place through the returned pointer without
+// re-inserting. (The user is responsible for synchronising concurrent
+// mutation of a single shared object; the map only guards its own structure.)
+struct Counter {
+    int value = 0;
+    std::string label;
+};
+
+void test_shared_ptr_value_mutation_visible() {
+    hashmap<int, std::shared_ptr<Counter>> m;
+    m.add_or_update_mapping(1, std::make_shared<Counter>(Counter{10, "a"}));
+
+    // Fetch a handle to the stored object and mutate through it.
+    auto handle = m.value_for(1);
+    CHECK(handle != nullptr);
+    handle->value = 42;
+    handle->label = "changed";
+
+    // A fresh lookup must observe the mutation: same underlying object.
+    auto again = m.value_for(1);
+    CHECK(again == handle);            // identical shared_ptr (same control block)
+    CHECK(again->value == 42);
+    CHECK(again->label == "changed");
+    CHECK(m.size() == 1);
+}
+
+void test_shared_ptr_missing_key_is_null() {
+    hashmap<int, std::shared_ptr<Counter>> m;
+    CHECK(m.value_for(7) == nullptr);          // default-constructed shared_ptr
+    CHECK(m.size() == 0);
+}
+
+// Replacing the mapping installs a *new* object; the old handle keeps the old
+// object alive but is decoupled from the map.
+void test_shared_ptr_update_replaces_object() {
+    hashmap<int, std::shared_ptr<Counter>> m;
+    auto first = std::make_shared<Counter>(Counter{1, "first"});
+    m.add_or_update_mapping(1, first);
+
+    auto second = std::make_shared<Counter>(Counter{2, "second"});
+    m.add_or_update_mapping(1, second);        // overwrite the value
+
+    auto current = m.value_for(1);
+    CHECK(current == second);
+    CHECK(current != first);
+    CHECK(current->value == 2);
+    CHECK(first->value == 1);                  // old object untouched, still alive
+    CHECK(m.size() == 1);
 }
 
 // ---- concurrency ------------------------------------------------------------
@@ -242,6 +297,9 @@ int main() {
     RUN(test_add_remove_readd);
     RUN(test_many_keys_with_collisions);
     RUN(test_string_keys_and_values);
+    RUN(test_shared_ptr_value_mutation_visible);
+    RUN(test_shared_ptr_missing_key_is_null);
+    RUN(test_shared_ptr_update_replaces_object);
     RUN(test_concurrent_disjoint_writers);
     RUN(test_concurrent_same_key_updates);
     RUN(test_concurrent_readers_and_writers);
