@@ -56,8 +56,12 @@ struct list {
             std::unique_lock lk2(next->m);
             if (pred(*next->data)) {
                 // need this line so that we do not destroy next (and its mutex) early
-                auto old_next = std::move(curr->next); 
+                auto old_next = std::move(curr->next);
                 curr->next = std::move(next->next);
+                
+                // release lk2 before old_next (which owns next's mutex) is
+                // destroyed, otherwise ~unique_lock unlocks a freed mutex.
+                lk2.unlock();
                 return;
             } else {
                 curr = next;
@@ -78,7 +82,8 @@ struct list {
             std::unique_lock lk2(next->m);
             lk.unlock();
             fn(next->data.get());
-            lk = std::move(lk2)
+            curr = next;
+            lk = std::move(lk2);
         }
     }
 };
