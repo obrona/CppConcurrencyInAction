@@ -86,7 +86,7 @@ void test_string_type() {
 // exactly once, with no duplicates and no losses.
 void test_concurrent_push_then_pop() {
     constexpr int num_threads = 8;
-    constexpr int per_thread = 10;
+    constexpr int per_thread = 1000;
     lock_free_stack<int> s;
 
     std::vector<std::thread> producers;
@@ -117,7 +117,7 @@ void test_concurrent_push_then_pop() {
 void test_concurrent_push_pop() {
     constexpr int num_producers = 4;
     constexpr int num_consumers = 4;
-    constexpr int per_thread = 20;
+    constexpr int per_thread = 2000;
     constexpr int total = num_producers * per_thread;
 
     lock_free_stack<int> s;
