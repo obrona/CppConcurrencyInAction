@@ -26,13 +26,13 @@ struct lock_free_stack {
     std::shared_ptr<T> pop() {
         ++threads_in_pop;
         node *old_head = head.load();
-        while (old_head && head.compare_exchange_weak(old_head, old_head->next));
+        while (old_head && !head.compare_exchange_weak(old_head, old_head->next));
         
         std::shared_ptr<T> res;
         if (old_head) {
             res.swap(old_head->data);
+            try_reclaim(old_head);
         }
-        try_reclaim(old_head);
         return res;
     }
 
@@ -44,17 +44,18 @@ struct lock_free_stack {
         }
     }
 
+    // make sure old_head is not nullptr.
     void try_reclaim(node* old_head) {
         if (threads_in_pop == 1) {
             node *nodes_to_delete = to_be_deleted.exchange(nullptr);
             if (--threads_in_pop == 0) {
                 delete_nodes(nodes_to_delete);
-            } else {
+            } else if (nodes_to_delete) {
                 chain_pending_nodes(nodes_to_delete);
             }
             delete old_head;
         } else {
-            chain_pending_nodes(old_head);
+            chain_pending_node(old_head);
             --threads_in_pop;
         }
     }
@@ -71,5 +72,16 @@ struct lock_free_stack {
     void chain_pending_nodes(node *first, node *last) {
         last->next = to_be_deleted.load();
         while (!to_be_deleted.compare_exchange_weak(last->next, first));
+    }
+
+    void chain_pending_node(node *n) {
+        // old_head->next which points to REAL LIVE nodes.
+        // so cannot use chain_pending_nodes() that traverses the links.
+        chain_pending_nodes(n, n);
+    }
+
+    ~lock_free_stack() {
+        delete_nodes(head.load());
+        delete_nodes(to_be_deleted.load());
     }
 };
