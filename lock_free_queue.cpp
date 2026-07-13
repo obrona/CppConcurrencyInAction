@@ -50,22 +50,22 @@ class lock_free_queue {
     static void increase_external_count(std::atomic<counted_node_ptr>& counter, counted_node_ptr& old_counter) {
         counted_node_ptr new_counter;
         do {
-            new_counter=old_counter;
+            new_counter = old_counter;
             ++new_counter.external_count;
         } while (!counter.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
-        old_counter.external_count=new_counter.external_count;
+        old_counter.external_count = new_counter.external_count;
     }
 
     static void free_external_counter(counted_node_ptr &old_node_ptr) {
         node* const ptr = old_node_ptr.ptr;
-        int const count_increase = old_node_ptr.external_count-2;
+        int const count_increase = old_node_ptr.external_count - 2;
         node_counter old_counter = ptr->count.load(std::memory_order_relaxed);
         node_counter new_counter;
         do {
-            new_counter=old_counter;
+            new_counter = old_counter;
             --new_counter.external_counters;
             new_counter.internal_count += count_increase;
-        } while(!ptr->count.compare_exchange_strong(old_counter,new_counter, std::memory_order_acquire,std::memory_order_relaxed));
+        } while(!ptr->count.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
         if(!new_counter.internal_count && !new_counter.external_counters) {
             delete ptr;
         }
@@ -91,13 +91,13 @@ class lock_free_queue {
         counted_node_ptr new_next;
         new_next.ptr = new node;
         new_next.external_count = 1;
-        counted_node_ptr old_tail=tail.load();
+        counted_node_ptr old_tail = tail.load();
         for(;;) {
             increase_external_count(tail,old_tail);
             T* old_data=nullptr;
             if (old_tail.ptr->data.compare_exchange_strong(old_data,new_data.get())) {
-                old_tail.ptr->next=new_next;
-                old_tail=tail.exchange(new_next);
+                old_tail.ptr->next = new_next;
+                old_tail = tail.exchange(new_next);
                 free_external_counter(old_tail);
                 new_data.release();
                 break;
@@ -129,9 +129,3 @@ class lock_free_queue {
 
     
 };
-
-int main() {
-    lock_free_queue<int> q{};
-    for (int i = 0; i < 5; i++) q.push(i);
-    for (int i = 0; i < 5; i++) q.pop();
-}
