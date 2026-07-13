@@ -39,7 +39,7 @@ class lock_free_queue {
                 new_counter=old_counter;
                 --new_counter.internal_count;
             }
-            while (!count.compare_exchange_strong(old_counter,new_counter, std::memory_order_acquire,std::memory_order_relaxed));
+            while (!count.compare_exchange_strong(old_counter, new_counter));
             
             if (!new_counter.internal_count && !new_counter.external_counters) {
                 delete this;
@@ -52,7 +52,7 @@ class lock_free_queue {
         do {
             new_counter = old_counter;
             ++new_counter.external_count;
-        } while (!counter.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
+        } while (!counter.compare_exchange_strong(old_counter, new_counter));
         old_counter.external_count = new_counter.external_count;
     }
 
@@ -61,11 +61,13 @@ class lock_free_queue {
         int const count_increase = old_node_ptr.external_count - 2;
         node_counter old_counter = ptr->count.load(std::memory_order_relaxed);
         node_counter new_counter;
+        
         do {
             new_counter = old_counter;
             --new_counter.external_counters;
             new_counter.internal_count += count_increase;
-        } while(!ptr->count.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
+        } while (!ptr->count.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
+        
         if(!new_counter.internal_count && !new_counter.external_counters) {
             delete ptr;
         }
