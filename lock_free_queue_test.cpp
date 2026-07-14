@@ -140,7 +140,7 @@ void test_single_producer_multi_consumers() {
 }
 
 void test_multi_producers_multi_consumers() {
-    constexpr int PRODUCERS = 4, CONSUMERS = 4, PER_PRODUCER = 100;
+    constexpr int PRODUCERS = 4, CONSUMERS = 4, PER_PRODUCER = 10000;
     constexpr int TOTAL = PRODUCERS * PER_PRODUCER;
     lock_free_queue<int> q;
     atomic<int> popped{0};
