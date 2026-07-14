@@ -5,9 +5,10 @@ template<typename T>
 class lock_free_queue {
     private:
     struct node;
+    
     struct counted_node_ptr {
         int external_count;
-        node* ptr;
+        node* ptr = nullptr;
     };
     
     std::atomic<counted_node_ptr> head;
@@ -95,8 +96,8 @@ class lock_free_queue {
         new_next.external_count = 1;
         counted_node_ptr old_tail = tail.load();
         for(;;) {
-            increase_external_count(tail,old_tail);
-            T* old_data=nullptr;
+            increase_external_count(tail, old_tail);
+            T* old_data = nullptr;
             if (old_tail.ptr->data.compare_exchange_strong(old_data,new_data.get())) {
                 old_tail.ptr->next = new_next;
                 old_tail = tail.exchange(new_next);
@@ -109,7 +110,7 @@ class lock_free_queue {
     }
 
     std::unique_ptr<T> pop() {
-        counted_node_ptr old_head=head.load(std::memory_order_relaxed);
+        counted_node_ptr old_head = head.load(std::memory_order_relaxed);
         for(;;) {
             increase_external_count(head,old_head);
             node* const ptr = old_head.ptr;
@@ -119,7 +120,7 @@ class lock_free_queue {
                 return std::unique_ptr<T>();
             }
             
-            if (head.compare_exchange_strong(old_head,ptr->next)) {
+            if (head.compare_exchange_strong(old_head, ptr->next)) {
                 T* const res = ptr->data.exchange(nullptr);
                 free_external_counter(old_head);
                 return std::unique_ptr<T>(res);
