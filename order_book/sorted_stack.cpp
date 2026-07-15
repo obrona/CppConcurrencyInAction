@@ -38,6 +38,7 @@ struct sorted_stack {
         while (1) {
             node* next_node = curr->next.load();
 
+            start:
             // Advance past every node that compares strictly less than val,
             // so val lands before the first node that is >= val.
             if (next_node && cmp(*next_node->data, val)) {
@@ -49,9 +50,11 @@ struct sorted_stack {
             new_node->next.store(next_node);
             if (curr->next.compare_exchange_weak(next_node, new_node)) {
                 return;
+            } else {
+                goto start;
             }
-            // CAS failed: another thread mutated curr->next. next_node now
-            // holds the fresh value, so re-evaluate from the same curr.
+            // CAS failed: another thread mutated curr->next.
+            // next_node and curr->next holds the new value, so just repeat the process.
         }
     }
 
