@@ -3,7 +3,7 @@
 
 // special stack for phase concurrency.
 // either all threads call add
-// or all threads iterate the stack from the head, cannot modify the stack but can modify data.
+// or all threads iterate the stack from the head, cannot modify the stack but can modify data
 // or 1 thread cleans up the stack.
 template <typename T, typename Compare = std::less<T>>
 struct sorted_stack {
