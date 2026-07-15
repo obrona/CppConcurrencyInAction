@@ -56,11 +56,13 @@ struct sorted_stack {
     }
 
     // only 1 thread calls this.
-    void clean(function<bool(T)> pred) {
+    void clean(std::function<bool(const T&)> pred) {
         node* curr = head;
         while (1) {
             node* next_node = curr->next.load();
-            if (pred(*head->data)) {
+            if (!next_node) return;
+
+            if (pred(*next_node->data)) {
                 curr->next.store(next_node->next.load());
                 delete next_node->data;
                 delete next_node;
