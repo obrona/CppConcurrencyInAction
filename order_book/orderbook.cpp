@@ -2,6 +2,7 @@
 #include <algorithm>
 #include "single_lane_bridge.cpp"
 #include "sorted_stack.cpp"
+#include "event_log.cpp"
 
 enum class order_type { buy, sell };
 
@@ -11,12 +12,17 @@ int get_time() {
     return timestamp.fetch_add(1, std::memory_order_relaxed);
 }
 
-//TODO
-void log_cancel(int time, int id, bool success) {}
+void log_cancel(int time, int id, bool success) {
+    global_log.push({time, success ? event_kind::cancel_ok : event_kind::cancel_fail, id});
+}
 
-void log_active_resting_match(int time, int active_id, int resting_id, int price, int quantity) {}
+void log_active_resting_match(int time, int active_id, int resting_id, int price, int quantity) {
+    global_log.push({time, event_kind::match, active_id, resting_id, price, quantity});
+}
 
-void log_add_resting_order(int time, int active_id, int price, int quantity) {}
+void log_add_resting_order(int time, int active_id, int price, int quantity) {
+    global_log.push({time, event_kind::rest, active_id, -1, price, quantity});
+}
 
 struct resting_order {
     const order_type type = order_type::buy;
