@@ -21,6 +21,14 @@ struct sorted_stack {
     node* head = new node();
     std::atomic<node*> to_be_deleted{nullptr};
 
+    // the queue has no stale pointers, but this is up to user to ensure.
+    // i.e user must call free_deleted_nodes with a consistent predicate.
+    // otherwise we have stale pointers which results in double free.
+    // precondition: no queued node is still reachable from head, i.e. the
+    // caller ran free_deleted_nodes with a predicate that is true for every
+    // queued node (cancels queue without unlinking, and racing unlinks can
+    // resurrect queued nodes). otherwise the walk and free_queue both delete
+    // the same node -> double free.
     ~sorted_stack() {
         node* curr = head;
         while (1) {
