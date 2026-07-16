@@ -1,4 +1,5 @@
 #include <atomic>
+#include <algorithm>
 #include "single_lane_bridge.cpp"
 #include "sorted_stack.cpp"
 
@@ -56,15 +57,17 @@ struct CmpSell {
 
 struct orderbook {
     single_lane_bridge slb;
-    sorted_stack<resting_order, CmpBuy> resting_buys;
-    sorted_stack<resting_order, CmpSell> resting_sells;
-
+    
+    sorted_stack<resting_order, CmpBuy> resting_buys;     // in decreasing order
+    sorted_stack<resting_order, CmpSell> resting_sells;   // in increasing order
+    
+    std::function<bool(const resting_order&)> delete_pred = [] (const resting_order& r) { return r.cnt.load() == 0; };
     // buy is 0, sell is 1
     bool type_to_side(order_type type) {
         return type == order_type::sell;
     }
 
-    // cancel never relinks nodes, just set the cnt to 0.
+    // cancel buy/sell never relinks nodes, just set the cnt to 0.
     void cancel_buy_order(int id) {
         lock_bridge lk(slb, type_to_side(order_type::sell));
 
@@ -117,11 +120,6 @@ struct orderbook {
         log_cancel(get_time(), id, false);
     }
 
-
-    // if we delete nodes, there cannot be another thread ahead of us deleting nodes.
-    // because then the current node will have remaining of 0.
-    // so it is safe to redirect curr->next to the next node.
-    // basically a moving buy will set the sell nodes cnt to 0, from left to right until the buy cnt is 0.
     void active_buy(int id, int price, int cnt) {
         lock_bridge lk(slb, type_to_side(order_type::buy));
 
@@ -146,16 +144,20 @@ struct orderbook {
 
                 if (remaining - quantity == 0) {
                     curr->next.store(next_node->next.load());
-                } else {
-                    curr = next_node->next.load();
                     resting_sells.add_node_to_delete(next_node);
+                } else {
+                    // active order cnt is 0.
+                    return;   
                 }
                 break;
             }
         }
 
-        if (cnt > 0) resting_buys.add(resting_order{order_type::buy, id, price, cnt});
-        log_add_resting_order(get_time(), id, price, cnt);
+        if (cnt > 0) {
+            resting_buys.add(resting_order{order_type::buy, id, price, cnt});
+            log_add_resting_order(get_time(), id, price, cnt);
+        }
+       
     }
 
     void active_sell(int id, int price, int cnt) {
@@ -164,7 +166,7 @@ struct orderbook {
         auto curr = resting_buys.head;
         while (auto next_node = curr->next.load()) {
             resting_order& r = *next_node->data;
-            if (r.price > price) break;
+            if (r.price < price) break;
             
             int remaining = r.cnt.load();
             if (remaining == 0) {
@@ -182,15 +184,19 @@ struct orderbook {
 
                 if (remaining - quantity == 0) {
                     curr->next.store(next_node->next.load());
-                } else {
-                    curr = next_node->next.load();
                     resting_buys.add_node_to_delete(next_node);
+                } else {
+                    // active order cnt is 0.
+                    return;
                 }
                 break;
             }
         }
 
-        if (cnt > 0) resting_sells.add(resting_order{order_type::buy, id, price, cnt});
-        log_add_resting_order(get_time(), id, price, cnt);
+        if (cnt > 0) {
+            resting_sells.add(resting_order{order_type::sell, id, price, cnt});
+            log_add_resting_order(get_time(), id, price, cnt);
+        }
+        
     }
 };

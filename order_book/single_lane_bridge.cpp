@@ -34,7 +34,9 @@ struct lock_bridge {
     int side;
     std::function<void()> cleanup;
 
-    lock_bridge(single_lane_bridge& slb, int side, std::function<void()> cleanup = [] {}): slb(slb), side(side), cleanup(cleanup) {}
+    lock_bridge(single_lane_bridge& slb, int side, std::function<void()> cleanup = [] {}): slb(slb), side(side), cleanup(cleanup) {
+        slb.enter(side);
+    }
 
     ~lock_bridge() {
         slb.leave(side, cleanup);

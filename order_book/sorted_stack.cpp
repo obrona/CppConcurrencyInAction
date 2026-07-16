@@ -62,34 +62,6 @@ struct sorted_stack {
         }
     }
 
-    // accepts a function that may mutate data.
-    // and returns a boolean, whether we can delete this node or not.
-    // if multiple threads apply the function to be same node, then user must ensure
-    // only 1 thread returns true, otherwise we have double free.
-    // function is most likely to match active and resting orders in a cas loop.
-    // the thread that successfully makes the order count to 0 is the one that returns true.
-    //
-    // this function is also used to cancel orders.
-    // apply_and_maybe_delete tries to set the cnt to 0 in a cas loop.
-    // the winning thread (only 1) deletes the node.
-    //
-    // the loading of the new next pointer may not be seen by other threads yet, but that is okay
-    // as apply_and_maybe_delete will correctly handle lazily deleted nodes (by checking T* data in node).
-    // and the iteration is still preserved, threads will still be able to access the later nodes, as we
-    // do not do garbage collection in this phase and the next pointer is still preserved.
-    void read_and_delete(std::function<bool(T&)> apply_and_maybe_delete) {
-        node* curr = head;
-        while (node* next_node = curr->next.load()) {
-            bool can_delete = apply_and_maybe_delete(*next_node->data);
-            if (can_delete) {
-                curr->next.store(next_node->next.load());
-                add_node_to_delete(next_node);
-            } else {
-                curr = next_node;
-            }
-        }
-    } 
-
     // only 1 thread calls this.
     void clean(std::function<bool(const T&)> pred) {
         node* curr = head;
@@ -116,7 +88,21 @@ struct sorted_stack {
     }
 
     // only 1 thread call this at the end for the phase.
-    void free_deleted_nodes() {
+    // now the list is weird with skip pointers.
+    // but most importantly nodes with cnt > 0 all accessible from head.
+    // but we can encounter some nodes with cnt == 0.
+    // these nodes are in to_be_deleted.
+    void free_deleted_nodes(std::function<bool(const T&)> pred) {
+        node* curr_head = head;
+        while (node* next_node = curr_head->next.load()) {
+            if (pred(*next_node->data)) {
+                curr_head->next.store(next_node->next.load());
+            } else {
+                curr_head = next_node;
+            }
+        }
+
+
         node* curr = to_be_deleted.exchange(nullptr);
         while (curr) {
             node* next = curr->next_delete.load();
