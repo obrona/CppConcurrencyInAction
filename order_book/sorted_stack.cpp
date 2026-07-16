@@ -2,7 +2,7 @@
 #include <atomic>
 #include <functional>
 
-// we can have 1 pahse where threads can read the nodes and delete nodes.
+// we can have 1 phase where threads can read the nodes and delete nodes.
 // 1 phase where threads add nodes.
 // 1 phase where 1 thread does garbage collection.
 template <typename T, typename Compare = std::less<T>>
