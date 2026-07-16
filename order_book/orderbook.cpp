@@ -4,6 +4,19 @@
 
 enum class order_type { buy, sell };
 
+std::atomic<int> timestamp{0};
+
+int get_time() {
+    return timestamp.fetch_add(1, std::memory_order_relaxed);
+}
+
+//TODO
+void log_cancel(int time, int id, bool success) {}
+
+void log_active_resting_match(int time, int active_id, int resting_id, int price, int quantity) {}
+
+void log_add_resting_order(int time, int active_id, int price, int quantity) {}
+
 struct resting_order {
     const order_type type = order_type::buy;
     const int id = -1;
@@ -22,7 +35,7 @@ struct resting_order {
     resting_order(const resting_order& other): 
         type(other.type), 
         id(other.id), 
-        price(price), 
+        price(other.price), 
         cnt{other.cnt.load()} 
     {}
 };
@@ -51,62 +64,133 @@ struct orderbook {
         return type == order_type::sell;
     }
 
-    void cleanup() {
-        resting_buys.free_deleted_nodes();
-        resting_sells.free_deleted_nodes();
-    }
+    // cancel never relinks nodes, just set the cnt to 0.
+    void cancel_buy_order(int id) {
+        lock_bridge lk(slb, type_to_side(order_type::sell));
 
-    void cancel_order(order_type type, int id) {
-        static auto fn = [this] (resting_order& r) {
+        auto curr = resting_buys.head;
+        while (auto next_node = curr->next.load()) {
+            resting_order& r = *next_node->data;
             int cnt = r.cnt.load();
-            while (1) {
-                if (cnt == 0) return false;
-                bool res = r.cnt.compare_exchange_strong(cnt, 0);
-                if (res) return true;
+            if (r.id != id || cnt == 0) {
+                curr = next_node;
+                continue;
             }
-        };
 
-        int side = type_to_side(type);
-        lock_bridge lk(slb, side, [this] { this->cleanup(); });
-
-        if (type == order_type::buy) {
-            resting_buys.read_and_delete(fn);
-        } else {
-            resting_sells.read_and_delete(fn);
-        }
-    }
-
-    void enter_active_order(order_type type, int id, int price, int cnt) {
-        static auto fn = [this, type, price, &cnt] (resting_order& r) {
-            bool valid = type == order_type::buy && price >= r.price || type == order_type::sell && price <= r.price;
-            if (!valid) return false;
-
-            int curr_cnt = r.cnt.load();
-            while (1) {
-                if (curr_cnt == 0) return false;
-                int quantity = std::min(curr_cnt, cnt);
-                if (r.cnt.compare_exchange_strong(curr_cnt, curr_cnt - quantity)) {
-                    cnt -= quantity;
-                    return curr_cnt == 0;
+            while (cnt > 0) {
+                int time = get_time();
+                if (r.cnt.compare_exchange_strong(cnt, 0)) {
+                    log_cancel(time, id, true);
+                    return;
                 }
             }
-        };
 
-        int side = type_to_side(type);
-        lock_bridge lk(slb, side, [this] { this->cleanup(); });
-        
-        if (type == order_type::buy) {
-            resting_sells.read_and_delete(fn);
-        } else {
-            resting_buys.read_and_delete(fn);
+            break;
         }
 
-        if (cnt > 0) {
-            if (type == order_type::buy) {
-                resting_buys.add(resting_order{type, id, price, cnt});
-            } else {
-                resting_sells.add(resting_order{type, id, price, cnt});
+        log_cancel(get_time(), id, false);
+    }
+
+    void cancel_sell_order(int id) {
+        lock_bridge lk(slb, type_to_side(order_type::buy));
+
+        auto curr = resting_sells.head;
+        while (auto next_node = curr->next.load()) {
+            resting_order& r = *next_node->data;
+            int cnt = r.cnt.load();
+            if (r.id != id || cnt == 0) {
+                curr = next_node;
+                continue;
+            }
+
+            while (cnt > 0) {
+                int time = get_time();
+                if (r.cnt.compare_exchange_strong(cnt, 0)) {
+                    log_cancel(time, id, true);
+                    return;
+                }
+            }
+
+            break;
+        }
+
+        log_cancel(get_time(), id, false);
+    }
+
+
+    // if we delete nodes, there cannot be another thread ahead of us deleting nodes.
+    // because then the current node will have remaining of 0.
+    // so it is safe to redirect curr->next to the next node.
+    // basically a moving buy will set the sell nodes cnt to 0, from left to right until the buy cnt is 0.
+    void active_buy(int id, int price, int cnt) {
+        lock_bridge lk(slb, type_to_side(order_type::buy));
+
+        auto curr = resting_sells.head;
+        while (auto next_node = curr->next.load()) {
+            resting_order& r = *next_node->data;
+            if (r.price > price) break;
+            
+            int remaining = r.cnt.load();
+            if (remaining == 0) {
+                curr = next_node;
+                continue;
+            }
+
+            while (remaining > 0) {
+                int quantity = std::min(remaining, cnt);
+                int time = get_time();
+                if (!r.cnt.compare_exchange_strong(remaining, remaining - quantity)) continue;
+                
+                log_active_resting_match(time, id, r.id, r.price, quantity);
+                cnt -= quantity;
+
+                if (remaining - quantity == 0) {
+                    curr->next.store(next_node->next.load());
+                } else {
+                    curr = next_node->next.load();
+                    resting_sells.add_node_to_delete(next_node);
+                }
+                break;
             }
         }
+
+        if (cnt > 0) resting_buys.add(resting_order{order_type::buy, id, price, cnt});
+        log_add_resting_order(get_time(), id, price, cnt);
+    }
+
+    void active_sell(int id, int price, int cnt) {
+        lock_bridge lk(slb, type_to_side(order_type::sell));
+
+        auto curr = resting_buys.head;
+        while (auto next_node = curr->next.load()) {
+            resting_order& r = *next_node->data;
+            if (r.price > price) break;
+            
+            int remaining = r.cnt.load();
+            if (remaining == 0) {
+                curr = next_node;
+                continue;
+            }
+
+            while (remaining > 0) {
+                int quantity = std::min(remaining, cnt);
+                int time = get_time();
+                if (!r.cnt.compare_exchange_strong(remaining, remaining - quantity)) continue;
+                
+                log_active_resting_match(time, id, r.id, r.price, quantity);
+                cnt -= quantity;
+
+                if (remaining - quantity == 0) {
+                    curr->next.store(next_node->next.load());
+                } else {
+                    curr = next_node->next.load();
+                    resting_buys.add_node_to_delete(next_node);
+                }
+                break;
+            }
+        }
+
+        if (cnt > 0) resting_sells.add(resting_order{order_type::buy, id, price, cnt});
+        log_add_resting_order(get_time(), id, price, cnt);
     }
 };

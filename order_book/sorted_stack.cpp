@@ -117,7 +117,7 @@ struct sorted_stack {
 
     // only 1 thread call this at the end for the phase.
     void free_deleted_nodes() {
-        node* curr = to_be_deleted.load();
+        node* curr = to_be_deleted.exchange(nullptr);
         while (curr) {
             node* next = curr->next_delete.load();
             delete curr->data;
