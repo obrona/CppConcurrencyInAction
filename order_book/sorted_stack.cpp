@@ -10,6 +10,7 @@ struct sorted_stack {
     struct node {
         T* data = nullptr;
         std::atomic<node*> next{nullptr};
+        std::atomic<node*> next_delete{nullptr};
 
         node() {}
 
@@ -109,7 +110,7 @@ struct sorted_stack {
     void add_node_to_delete(node* n) {
         node* next_node = to_be_deleted.load();
         while (1) {
-            n->next.store(next_node);
+            n->next_delete.store(next_node);
             if (to_be_deleted.compare_exchange_strong(next_node, n)) break;
         }
     }
@@ -118,7 +119,7 @@ struct sorted_stack {
     void free_deleted_nodes() {
         node* curr = to_be_deleted.load();
         while (curr) {
-            node* next = curr->next.load();
+            node* next = curr->next_delete.load();
             delete curr->data;
             delete curr;
             curr = next;
