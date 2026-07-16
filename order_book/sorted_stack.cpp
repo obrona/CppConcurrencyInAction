@@ -32,7 +32,7 @@ struct sorted_stack {
             curr = next_node;
         }
 
-        free_deleted_nodes();
+        free_queue();
     }
 
     void add(const T& val) {
@@ -91,18 +91,25 @@ struct sorted_stack {
     // now the list is weird with skip pointers.
     // but most importantly nodes with cnt > 0 all accessible from head.
     // but we can encounter some nodes with cnt == 0.
-    // these nodes are in to_be_deleted.
+    // these nodes are in to_be_deleted, so unlink them here and let
+    // free_queue delete them exactly once.
     void free_deleted_nodes(std::function<bool(const T&)> pred) {
-        node* curr_head = head;
-        while (node* next_node = curr_head->next.load()) {
+        node* curr = head;
+        while (node* next_node = curr->next.load()) {
             if (pred(*next_node->data)) {
-                curr_head->next.store(next_node->next.load());
+                curr->next.store(next_node->next.load());
             } else {
-                curr_head = next_node;
+                curr = next_node;
             }
         }
 
+        free_queue();
+    }
 
+    // caller must ensure no queued node is still reachable from head
+    // (true after the sweep in free_deleted_nodes, and at destruction
+    // because every phase end runs free_deleted_nodes).
+    void free_queue() {
         node* curr = to_be_deleted.exchange(nullptr);
         while (curr) {
             node* next = curr->next_delete.load();

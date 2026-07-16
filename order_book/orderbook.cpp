@@ -67,9 +67,10 @@ struct orderbook {
         return type == order_type::sell;
     }
 
-    // cancel buy/sell never relinks nodes, just set the cnt to 0.
+    // cancel buy/sell never relinks nodes, just set the cnt to 0
+    // and queue the node so the phase-end sweep frees it.
     void cancel_buy_order(int id) {
-        lock_bridge lk(slb, type_to_side(order_type::sell));
+        lock_bridge lk(slb, type_to_side(order_type::sell), [this] { resting_buys.free_deleted_nodes(delete_pred); });
 
         auto curr = resting_buys.head;
         while (auto next_node = curr->next.load()) {
@@ -83,6 +84,7 @@ struct orderbook {
             while (cnt > 0) {
                 int time = get_time();
                 if (r.cnt.compare_exchange_strong(cnt, 0)) {
+                    resting_buys.add_node_to_delete(next_node);
                     log_cancel(time, id, true);
                     return;
                 }
@@ -95,7 +97,7 @@ struct orderbook {
     }
 
     void cancel_sell_order(int id) {
-        lock_bridge lk(slb, type_to_side(order_type::buy));
+        lock_bridge lk(slb, type_to_side(order_type::buy), [this] { resting_sells.free_deleted_nodes(delete_pred); });
 
         auto curr = resting_sells.head;
         while (auto next_node = curr->next.load()) {
@@ -109,6 +111,7 @@ struct orderbook {
             while (cnt > 0) {
                 int time = get_time();
                 if (r.cnt.compare_exchange_strong(cnt, 0)) {
+                    resting_sells.add_node_to_delete(next_node);
                     log_cancel(time, id, true);
                     return;
                 }
@@ -121,7 +124,7 @@ struct orderbook {
     }
 
     void active_buy(int id, int price, int cnt) {
-        lock_bridge lk(slb, type_to_side(order_type::buy));
+        lock_bridge lk(slb, type_to_side(order_type::buy), [this] { resting_sells.free_deleted_nodes(delete_pred); });
 
         auto curr = resting_sells.head;
         while (auto next_node = curr->next.load()) {
@@ -145,6 +148,7 @@ struct orderbook {
                 if (remaining - quantity == 0) {
                     curr->next.store(next_node->next.load());
                     resting_sells.add_node_to_delete(next_node);
+                    if (cnt == 0) return;
                 } else {
                     // active order cnt is 0.
                     return;   
@@ -161,7 +165,7 @@ struct orderbook {
     }
 
     void active_sell(int id, int price, int cnt) {
-        lock_bridge lk(slb, type_to_side(order_type::sell));
+        lock_bridge lk(slb, type_to_side(order_type::sell), [this] { resting_buys.free_deleted_nodes(delete_pred); });
 
         auto curr = resting_buys.head;
         while (auto next_node = curr->next.load()) {
@@ -185,6 +189,7 @@ struct orderbook {
                 if (remaining - quantity == 0) {
                     curr->next.store(next_node->next.load());
                     resting_buys.add_node_to_delete(next_node);
+                    if (cnt == 0) return;
                 } else {
                     // active order cnt is 0.
                     return;
