@@ -73,8 +73,7 @@ struct orderbook {
         return type == order_type::sell;
     }
 
-    // cancel buy/sell never relinks nodes, just set the cnt to 0
-    // and queue the node so the phase-end sweep frees it.
+    // cancel can also unlink nodes.
     void cancel_buy_order(int id) {
         lock_bridge lk(slb, type_to_side(order_type::sell), [this] { resting_buys.free_deleted_nodes(delete_pred); });
 
@@ -90,6 +89,7 @@ struct orderbook {
             while (cnt > 0) {
                 int time = get_time();
                 if (r.cnt.compare_exchange_strong(cnt, 0)) {
+                    curr->next.store(next_node->next.load());
                     resting_buys.add_node_to_delete(next_node);
                     log_cancel(time, id, true);
                     return;
@@ -117,6 +117,7 @@ struct orderbook {
             while (cnt > 0) {
                 int time = get_time();
                 if (r.cnt.compare_exchange_strong(cnt, 0)) {
+                    curr->next.store(next_node->next.load());
                     resting_sells.add_node_to_delete(next_node);
                     log_cancel(time, id, true);
                     return;
