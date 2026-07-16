@@ -1,3 +1,4 @@
+#pragma once
 #include <mutex>
 #include <functional>
 #include <array>
@@ -18,12 +19,24 @@ struct single_lane_bridge {
         cnts[side]++;
     }
 
-    void leave(bool side, std::function<void()> cleanup) {
+    void leave(bool side, std::function<void()> cleanup = [] {}) {
         std::unique_lock lk{mut};
         cnts[side]--;
         if (cnts[side] == 0) {
             cleanup();
             cond.notify_all();
         }
+    }
+};
+
+struct lock_bridge {
+    single_lane_bridge& slb;
+    int side;
+    std::function<void()> cleanup;
+
+    lock_bridge(single_lane_bridge& slb, int side, std::function<void()> cleanup = [] {}): slb(slb), side(side), cleanup(cleanup) {}
+
+    ~lock_bridge() {
+        slb.leave(side, cleanup);
     }
 };
