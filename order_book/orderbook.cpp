@@ -3,14 +3,9 @@
 #include "single_lane_bridge.cpp"
 #include "sorted_stack.cpp"
 #include "event_log.cpp"
+#include "timestamp.cpp"
 
 enum class order_type { buy, sell };
-
-std::atomic<int> timestamp{0};
-
-int get_time() {
-    return timestamp.fetch_add(1, std::memory_order_relaxed);
-}
 
 void log_cancel(int time, int id, bool success) {
     global_log.push({time, success ? event_kind::cancel_ok : event_kind::cancel_fail, id});
@@ -165,8 +160,8 @@ struct orderbook {
         }
 
         if (cnt > 0) {
-            resting_buys.add(resting_order{order_type::buy, id, price, cnt});
-            log_add_resting_order(get_time(), id, price, cnt);
+            auto cb = [id, price, cnt] (int time) { log_add_resting_order(time, id, price, cnt); };
+            resting_buys.add(resting_order{order_type::buy, id, price, cnt}, cb);
         }
        
     }
@@ -206,8 +201,8 @@ struct orderbook {
         }
 
         if (cnt > 0) {
-            resting_sells.add(resting_order{order_type::sell, id, price, cnt});
-            log_add_resting_order(get_time(), id, price, cnt);
+            auto cb = [id, price, cnt] (int time) { log_add_resting_order(time, id, price, cnt); };
+            resting_sells.add(resting_order{order_type::sell, id, price, cnt}, cb);
         }
         
     }

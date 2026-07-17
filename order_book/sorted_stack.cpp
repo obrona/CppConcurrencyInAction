@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <functional>
+#include "timestamp.cpp"
 
 // we can have 1 phase where threads can read the nodes and delete nodes.
 // 1 phase where threads add nodes.
@@ -43,7 +44,10 @@ struct sorted_stack {
         free_queue();
     }
 
-    void add(const T& val) {
+    // cb (callback) takes in the printing function.
+    // we cannot print after the add() function finishes because then the timestamp can be wrong.
+    // eg thread 1 adds first, but thread 2 prints first.
+    void add(const T& val, std::function<void(int)> cb = [] (int time) {}) {
         node* new_node = new node(new T(val));
         node* curr = head;
 
@@ -60,7 +64,9 @@ struct sorted_stack {
 
             // Splice new_node between curr and next_node.
             new_node->next.store(next_node);
+            int time = get_time();
             if (curr->next.compare_exchange_weak(next_node, new_node)) {
+                cb(time);
                 return;
             } else {
                 goto start;
