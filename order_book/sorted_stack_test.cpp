@@ -16,7 +16,7 @@ template <typename T, typename C>
 vector<T> to_vector(sorted_stack<T, C>& s) {
     vector<T> out;
     for (auto* n = s.head->next.load(); n; n = n->next.load())
-        out.push_back(*n->data);
+        out.push_back(n->data);
     return out;
 }
 
@@ -249,20 +249,23 @@ void test_clean_respects_custom_comparator_order() {
 
 // clean must destroy the values it removes, not just unlink them, and the
 // destructor must not then free them a second time.
+// values are stored inline in the node, so the dummy head holds one
+// value-initialized T that stays live for as long as the stack does. it is
+// never part of the contents (to_vector skips it), hence the +1 on live.
 void test_clean_frees_removed_values() {
     tracked::live = 0;
     {
         sorted_stack<tracked> s;
         for (int i = 0; i < 100; i++) s.add(tracked{i});
-        assert(tracked::live == 100);
+        assert(tracked::live == 100 + 1);
 
         s.clean([](const tracked& t) { return t.v < 60; });   // removes 60 values
         assert((int)to_vector(s).size() == 40);
-        assert(tracked::live == 40);
+        assert(tracked::live == 40 + 1);
 
         s.clean([](const tracked&) { return true; });
         assert(to_vector(s).empty());
-        assert(tracked::live == 0);
+        assert(tracked::live == 1);   // only the dummy head is left
     }
     assert(tracked::live == 0);   // destructor after a full clean: no double free
 }

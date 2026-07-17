@@ -74,7 +74,7 @@ struct orderbook {
 
         auto curr = resting_buys.head;
         while (auto next_node = curr->next.load()) {
-            resting_order& r = *next_node->data;
+            resting_order& r = next_node->data;
             int cnt = r.cnt.load();
             if (r.id != id || cnt == 0) {
                 curr = next_node;
@@ -102,7 +102,7 @@ struct orderbook {
 
         auto curr = resting_sells.head;
         while (auto next_node = curr->next.load()) {
-            resting_order& r = *next_node->data;
+            resting_order& r = next_node->data;
             int cnt = r.cnt.load();
             if (r.id != id || cnt == 0) {
                 curr = next_node;
@@ -130,7 +130,7 @@ struct orderbook {
 
         auto curr = resting_sells.head;
         while (auto next_node = curr->next.load()) {
-            resting_order& r = *next_node->data;
+            resting_order& r = next_node->data;
             if (r.price > price) break;
             
             int remaining = r.cnt.load();
@@ -171,7 +171,7 @@ struct orderbook {
 
         auto curr = resting_buys.head;
         while (auto next_node = curr->next.load()) {
-            resting_order& r = *next_node->data;
+            resting_order& r = next_node->data;
             if (r.price < price) break;
             
             int remaining = r.cnt.load();

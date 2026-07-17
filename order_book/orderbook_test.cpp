@@ -77,13 +77,13 @@ vector<book_entry> dump_book(sorted_stack<resting_order, C>& s, bool descending,
     vector<book_entry> out;
     sorted_ok = true;
     for (auto* n = s.head->next.load(); n; n = n->next.load()) {
-        int q = n->data->cnt.load();
+        int q = n->data.cnt.load();
         if (q <= 0) continue;
         if (!out.empty()) {
             int prev = out.back().price;
-            if (descending ? n->data->price > prev : n->data->price < prev) sorted_ok = false;
+            if (descending ? n->data.price > prev : n->data.price < prev) sorted_ok = false;
         }
-        out.push_back({n->data->id, n->data->price, q});
+        out.push_back({n->data.id, n->data.price, q});
     }
     return out;
 }
